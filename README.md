@@ -1,3 +1,3 @@
 # sample.automation.scripts
 
-# Sample automation scripts written while I was working in Oracle
+# Sample automation scripts written when I worked in Oracle
