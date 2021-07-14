@@ -1,0 +1,597 @@
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
+
+import oracle.javatools.oats.ADFUtils;
+import oracle.oats.scripting.modules.basic.api.*;
+import oracle.oats.scripting.modules.browser.api.*;
+import oracle.oats.scripting.modules.functionalTest.api.*;
+import oracle.oats.scripting.modules.utilities.api.*;
+import oracle.oats.scripting.modules.utilities.api.sql.*;
+import oracle.oats.scripting.modules.utilities.api.xml.*;
+import oracle.oats.scripting.modules.utilities.api.file.*;
+import oracle.oats.scripting.modules.webdom.api.*;
+import oracle.oats.scripting.modules.adf.api.*;
+import lib.*;
+
+public class script extends IteratingVUserScript {
+	@ScriptService oracle.oats.scripting.modules.utilities.api.UtilitiesService utilities;
+	@ScriptService oracle.oats.scripting.modules.browser.api.BrowserService browser;
+	@ScriptService oracle.oats.scripting.modules.functionalTest.api.FunctionalTestService ft;
+	@ScriptService oracle.oats.scripting.modules.webdom.api.WebDomService web;
+	@ScriptService oracle.oats.scripting.modules.adf.api.ADFService adf;
+	@FunctionLibrary("CRMFuncLib") lib.myCompany.myTeam.CRMFuncLib cRMFuncLib;
+	@FunctionLibrary("Oracle_fusionlib") lib.fusion.automation.Oracle_fusionlib oracle_fusionlib;
+	@FunctionLibrary("ExportLib") lib.myCompany.myTeam.ExportLib exportLib;
+	@FunctionLibrary("ImportLib") lib.myCompany.myTeam.ImportLib importLib;
+
+	private ADFUtils adfUtils;
+	private String fuseWelcomeUrl,v_url,nodeValue1,v_uid,v_pwd,panel_txt,PageTitle,profile_value,task,title,Panel_txt,Title_text,CSVPath,DataFilePath,codeLinePath,spath=null;
+	private String [] val=null;
+	private boolean value;
+	private int profile_table = 0;
+
+	public void initialize() throws Exception {
+	
+	}
+
+	/**
+	 * Add code to be executed each iteration for this virtual user.
+	 */
+	public void run() throws Exception {
+	}
+
+	/* Method to login to FUSE Home Page for Standard Import UI (without/with setting profile option)*/
+
+	public void crm_login(boolean Flag, String p_userName,boolean flag) throws Exception {
+
+		adfUtils = new ADFUtils(this,web,adf).defaultTimeout(cRMFuncLib.getMaxTimeOut());
+		if(Flag==true){
+			//Call server health check API
+			if (cRMFuncLib.getEnvTagValue("EDQServerAddres").contains(".")) {
+				oracle_fusionlib.serverHealthCheck((cRMFuncLib.getEnvTagValue("EDQServerAddres").replace("http://","")).split("\\.")[0]);
+			} else {
+				oracle_fusionlib.serverHealthCheck((cRMFuncLib.getEnvTagValue("EDQServerAddres").replace("http://","")));
+			}
+			try {
+				fuseWelcomeUrl = cRMFuncLib.getXMLData("FUSEPLUS_Url"); //Read FuseWelcome URL
+				v_url = fuseWelcomeUrl;
+				nodeValue1 = cRMFuncLib.getXMLData(p_userName.toUpperCase());
+				if (!nodeValue1.isEmpty()){
+					nodeValue1.replace("%#9$","delimiter");
+					val = nodeValue1.split("\\%\\#9\\$");
+					v_uid = val[0];// UN: sales_admin, mhoope
+					v_pwd = val[1];// PW: Welcome1
+					info("Storing UserName: " + v_uid);
+					cRMFuncLib.StoreVariable("UserName", v_uid);				
+				}
+				else
+					cRMFuncLib.verify_step("UserID:" + p_userName + " Not found in UserXML","F");
+				info("UserID-" + v_uid);
+				info("Password-" + v_pwd);
+				//close all exisitng browser sessions before starting login 
+				browser.closeAllBrowsers();
+				think(10); //NOPMD
+				// Call CRM Cookie injection method for CI runs
+				String CI_RUN = cRMFuncLib.getXMLData("CI_ENV"); //Read CI_Env flag.This is to identify a CI Environment
+				if (CI_RUN.equalsIgnoreCase("yes") || CI_RUN.equalsIgnoreCase("y") || CI_RUN.equalsIgnoreCase("true")) {
+					info("Calling crm cookie injection for CI run");
+					cRMFuncLib.crm_cookie_injection();
+				} else
+					// Call central cookie injection for Other runs
+					oracle_fusionlib.oracle_cookie_injection(); 
+				// end cookie related changes
+				String pageindex = "", docindex;
+				//In local run when script is run from openscript cookie injeciton will not be called,hence launch browser explicitly
+				if (browser.getBrowser() == null) {
+					browser.launch();
+				}
+				pageindex = web.getFocusedWindow().getAttribute("index");
+				docindex = web.document("/web:window[@index='" + pageindex + "']").getAttribute("index");
+				web.window("/web:window[@index='" + pageindex + "']").maximize();
+				web.window("/web:window[@index='0' or @title='Welcome']").waitFor(200);//NOPMD
+				info("URL to be launched:" + v_url);
+				web.window("/web:window[@index='" + pageindex + "']").navigate(v_url); //navigate to SignPage
+				web.window("/web:window[@index='0' or @title='Welcome']").waitFor(200);//NOPMD
+
+				//Inserting the credentials to login into the application
+
+				web.textBox("{{obj.CommonOR.StandardUI_Username}}").setText(v_uid);
+				web.textBox("{{obj.CommonOR.StandardUI_Password}}").waitFor();
+				web.textBox("{{obj.CommonOR.StandardUI_Password}}").setPassword(v_pwd);
+				web.button("{{obj.CommonOR.StandardUI_OKButton}}").waitFor();
+				web.button("{{obj.CommonOR.StandardUI_OKButton}}").click();
+				if (flag==true){
+					setProfileOptions("CommonData"); //Set the profile options to 'YES'
+					navigateToImportManagement("CommonData");
+				}else if(flag==false){
+					navigateToImportManagement("CommonData");// Click on Navigator Link and then to the 'Import Management' link
+				}else{
+					cRMFuncLib.verify_step("Kindly set the 'FLAG' value to either true or false to set with/without the profile option","F");
+				}
+			}catch (Exception e) {
+				e.printStackTrace();
+			}
+		}else{
+			cRMFuncLib.verify_step("The Running flag is 'False', kindly turn it to 'True'","F");
+		}
+	}
+
+	/* Method to set the default profile options to 'YES'*/
+
+	public void setProfileOptions(String param) throws Exception {
+
+		adfUtils = new ADFUtils(this,web,adf).defaultTimeout(cRMFuncLib.getMaxTimeOut());
+		profile_value = cRMFuncLib.GetValuefromParamList(param,"ProfileValue");
+		task = cRMFuncLib.GetValuefromParamList(param,"Task");
+		title = cRMFuncLib.GetValuefromParamList(param,"Title");			
+		exportLib.searchAndSelectTask(task, title);
+		adf.inputText("{{obj.CommonOR.StandardUI_ProfilePage_ProfileCode_TextBox}}").setValue(profile_value);//NOPMD
+		adfUtils.waitForServer();
+		adf.commandButton("{{obj.CommonOR.StandardUI_ProfilePage_Save_Button}}").click();
+		adfUtils.waitForServer();
+		adf.query("{{obj.CommonOR.StandardUI_ProfilePage_SearchButton}}").clickButton("Search");
+		adfUtils.waitForServer();
+		profile_table = adf.table("{{obj.CommonOR.StandardUI_ProfilePage_ProfileTable}}").getRowCount();
+		info("The total number of row in profile value table is : " +profile_table);
+		if(profile_table==1){
+			cRMFuncLib.verify_step("There is a profile of the name " + profile_value + "  in the profile values table", "P");
+			String value = adf.selectOneChoice("{{obj.CommonOR.StandardUI_ProfilePage_SelectChoice}}").getSelected();
+			info("The profile value is set to : " +value);
+			if (value.contains("No")){
+				adf.selectOneChoice("{{obj.CommonOR.StandardUI_ProfilePage_SelectChoice}}").select("Yes");
+				adfUtils.waitForServer();
+				adf.commandButton("{{obj.CommonOR.StandardUI_ProfilePage_Save_Button}}").click();
+				adfUtils.waitForServer();
+				cRMFuncLib.verify_step("The profile option " + profile_value + "  in the profile values table HAS BEEN set to 'Yes'", "P");
+				adf.commandButton("{{obj.CommonOR.StandardUI_ProfilePage_CancelButton}}").click();	
+			}else if (value.contains("Yes")){
+				cRMFuncLib.verify_step("The profile option " + profile_value + "  in the profile values table is ALREADY set to 'Yes'", "P");
+			}
+		}else{
+			cRMFuncLib.verify_step("There is no profile of the name " + profile_value + "  in the profile values table", "F");
+		}
+	}
+
+	/*Method to navigate specifically to 'Import Management' link in the navigator page after login */
+
+	public void navigateToImportManagement(String param) throws Exception{
+
+		adfUtils = new ADFUtils(this,web,adf).defaultTimeout(cRMFuncLib.getMaxTimeOut());
+		Panel_txt = cRMFuncLib.GetValuefromParamList(param,"Profile_PanelTxt");
+		adf.commandImageLink("{{obj.CommonOR.StandardUI_NavigatorLink}}").click();//NOPMD
+		adfUtils.waitForServer();
+		//For the UI which has 'Import Management' link in the More link page
+		if (!adf.commandLink("{{obj.CommonOR.StandardUI_ImportManagement_Link}}").exists(10, TimeUnit.SECONDS)){
+			adf.commandLink("{{obj.CommonOR.StandardUI_More_Link}}").click();
+			adfUtils.waitForServer();
+			if (adf.commandLink("{{obj.CommonOR.StandardUI_ImportManagement_Link}}").exists(10, TimeUnit.SECONDS)){
+				adf.commandLink("{{obj.CommonOR.StandardUI_ImportManagement_Link}}").click();
+				adfUtils.waitForServer();
+				panel_txt = adf.panelHeader("{{obj.CommonOR.StandardUI_LandingPage_PanelHeader}}").getDisplayText();
+				if (panel_txt.contains(Panel_txt))
+					cRMFuncLib.verify_step("Import Management link is clicked and we are at the landing page","P");
+				else
+					cRMFuncLib.verify_step("Landing page is not displayed","F");				
+			}else
+				cRMFuncLib.verify_step("Import Management link is not displayed","F");				
+			//For the UI which has 'Import Management' link in the Navigator page itself
+		}else if(adf.commandLink("{{obj.CommonOR.StandardUI_ImportManagement_Link}}").exists(10,TimeUnit.SECONDS))
+		{
+			adf.commandLink("{{obj.CommonOR.StandardUI_ImportManagement_Link}}").click();
+			adfUtils.waitForServer();
+			panel_txt = adf.panelHeader("{{obj.CommonOR.StandardUI_LandingPage_PanelHeader}}").getDisplayText();
+			if (panel_txt.contains(Panel_txt))			
+				cRMFuncLib.verify_step("Import Management link is clicked and we are at the landing page","P");
+			else
+				cRMFuncLib.verify_step("Landing page is not displayed","F");			
+		}else
+			cRMFuncLib.verify_step("Import Management link is not displayed in the navigator page","F");			
+	}
+
+	/*Method to verify a text in the chosen file*/
+
+	public void verifyTextInChosenFile(String csvFileName,String error_txt) throws Exception{
+
+		String line = null;
+		String listString="";
+		BufferedReader stream = null;
+		String txt = error_txt;
+		int count = 0;
+		List<List<String>> csvData = new ArrayList<List<String>>();
+		try {
+			stream = new BufferedReader(new FileReader(csvFileName));
+			while ((line = stream.readLine()) != null){
+				csvData.add(Arrays.asList(line.split(",")));
+			}
+			for (int i=0; i<csvData.size(); i++){
+				List<String> innerlst = csvData.get(i);
+				int length = csvData.get(i).size();
+				for (String s : innerlst)
+				{
+					listString+=s;
+					if(listString.contains(txt)){
+						count++;
+					}else{
+						continue;
+					}
+				}
+			}	
+			if (count>=1){
+				cRMFuncLib.verify_step("The selected text is available in the file, hence the file is not empty and has some records","P");	
+			}else{
+				cRMFuncLib.verify_step("The selected text is not available in the file or the file is not downloadable","F");	
+			}
+		} catch(Exception e){
+			e.printStackTrace();
+		}finally{
+			stream.close();
+		}
+	}
+
+	/* Method to modify values in the CSV file based on rows and column number and returns a String*/
+
+	public String modifyValuesInCSVFile(String param,int rownumber,int columnnumber,String separator,String text,String CSVPath) throws Exception{
+
+		int counter = 0;
+		FileWriter output=null;
+		BufferedWriter bw = null;
+		String oldtext = "";
+		String newLine = System.getProperty("line.separator");
+		String line = null;
+		String[] args = null;
+		BufferedReader stream = null;
+		try {
+			info("The text to be replaced is : " + text);
+			stream = new BufferedReader(new FileReader(CSVPath));
+			while ((line = stream.readLine()) != null){
+				if (counter==rownumber){
+					args = line.split(separator);
+					info("the value to be modified is :" +args[columnnumber]);
+					if ((args[columnnumber].length())>0){
+						info("The line before is : " + line);
+						line = line.replaceAll(args[columnnumber], text);
+						info("The line after is : " + line);
+						cRMFuncLib.verify_step("The text has been changed in the selected file successfully which is : " + text,"P");
+					}else{
+						cRMFuncLib.verify_step("The row in the file doesnot have the required value/ it is blank","F");
+					}					
+				}else{
+					info("We will read the next line");
+				}
+				info("Initially old text value is : " + oldtext);
+				oldtext = oldtext+line+""+newLine;	
+				info("The line written is line number:" + (counter+1)+", and the line is : " +oldtext);
+				output = new FileWriter(CSVPath);
+				BufferedWriter writer=new BufferedWriter(output);
+				writer.write(oldtext);
+				writer.flush();
+				cRMFuncLib.verify_step("The text is written succesfully in the source file for line number " + (counter+1),"P");
+				counter++;
+				if(counter>rownumber){
+					break;
+				}
+			}
+		} catch(Exception e){
+			e.printStackTrace();
+		}finally{
+			stream.close();
+			output.flush();
+			output.close();
+		}
+		return CSVPath;
+	}
+
+	/*Method to unzip a zipped file which returns a List of file path unzipped into a location */
+
+	public List<String> unzipFolderReturnsPath(String zipFile, String outputFolder) throws Exception{ 
+
+		ZipInputStream zis = null;
+		FileOutputStream fos = null;
+		List<String> ls = new ArrayList<String>();
+		byte[] buffer = new byte[1024];
+		try{
+			//create output directory is not exists
+			File folder = new File(outputFolder);
+			if(!folder.exists()){
+				folder.mkdir();
+			}
+			//Retrieve the zip file contents
+			zis =new ZipInputStream(new FileInputStream(zipFile));
+			//get the zipped file list entry
+			ZipEntry ze = zis.getNextEntry();
+			while(ze!=null){
+
+				String fileName = ze.getName();
+				File newFile = new File(outputFolder + File.separator + fileName);
+				System.out.println("file unzipped is : "+ newFile.getAbsoluteFile());
+				new File(newFile.getParent()).mkdirs();
+				fos = new FileOutputStream(newFile);
+				int len;
+				while ((len = zis.read(buffer)) > 0) {
+					fos.write(buffer, 0, len);
+					fos.flush();
+				}
+				ls.add(newFile.getAbsoluteFile().toString());
+				ze = zis.getNextEntry();
+			}
+		}catch(IOException ex){
+			ex.printStackTrace();
+		}finally{
+			fos.close();
+			zis.closeEntry();
+			zis.close();
+		}
+		return ls;
+	}
+
+	/* Method to validate the Account page with the searched value*/
+
+	public void validateAccountPage(String testcaseName,String Searchedvalue) throws Exception{
+
+		adfUtils = new ADFUtils(this,web,adf).defaultTimeout(cRMFuncLib.getMaxTimeOut());
+		String SearchedName = cRMFuncLib.GetValuefromParamList(testcaseName,"AccountPage_AccountName");
+		adf.commandToolbarButton("{{obj.CommonOR.StandardImportUI_Accounts_ShowAdvLink}}").clickButton();
+		adfUtils.waitForServer();
+		adf.selectOneChoice("{{obj.CommonOR.StandardImportUI_AccountPage_SelectOneName}}").select(SearchedName);  //NOPMD
+		think(5);
+		adf.inputText("{{obj.CommonOR.StandardImportUI_AccountPage_InputText}}").setValue(Searchedvalue); //NOPMD
+		adfUtils.waitForServer();
+		adf.query("{{obj.CommonOR.StandardImportUI_AccountsPage_SearchButton}}").clickButton("Search");
+		adfUtils.waitForServer();
+		int count = adf.table("{{obj.CommonOR.StandardImportUI_AccountsPage_ADFTable}}").getVisibleRowCount();
+		info("The row count is : "+ count);
+		if (count>0){
+			cRMFuncLib.verify_step("The table has the selected value searched", "P");
+		}else{
+			cRMFuncLib.verify_step("The table doesnot have the selected value searched", "F");
+		}                             
+	}
+
+	/* Method to validate the Account page with the searched value for negative Scenario*/
+
+	public void validateAccountPageNegScenario(String testcaseName,String Searchedvalue) throws Exception{
+
+		adfUtils = new ADFUtils(this,web,adf).defaultTimeout(cRMFuncLib.getMaxTimeOut());
+		String SearchedName = cRMFuncLib.GetValuefromParamList(testcaseName,"AccountPage_AccountName");
+		adf.commandToolbarButton("{{obj.CommonOR.StandardImportUI_Accounts_ShowAdvLink}}").clickButton();
+		adfUtils.waitForServer();
+		adf.selectOneChoice("{{obj.CommonOR.StandardImportUI_AccountPage_SelectOneName}}").select(SearchedName); //NOPMD
+		think(5);
+		adf.inputText("{{obj.CommonOR.StandardImportUI_AccountPage_InputText}}").setValue(Searchedvalue); //NOPMD
+		adfUtils.waitForServer();
+		adf.query("{{obj.CommonOR.StandardImportUI_AccountsPage_SearchButton}}").clickButton("Search");
+		adfUtils.waitForServer();
+		int count = adf.table("{{obj.CommonOR.StandardImportUI_AccountsPage_ADFTable}}").getVisibleRowCount();
+		info("The row count is : "+ count);
+		if (!(count>0)){
+			cRMFuncLib.verify_step("The table should not have any row after importing the delete csv file , hence its passed", "P");
+		}else{
+			cRMFuncLib.verify_step("The table has row even after importing the delete csv file, hence its a fail", "F");
+		}
+	}
+
+	//Method to create a new CSV Import File using the respective Template File name from the test data sheet
+
+	public void dynamicCsvFilePreparation(String csvdatareplacementparamlist,String TemplateName,String ImportFileNameparamlist)throws Exception{
+
+		adfUtils = new ADFUtils(this,web,adf).defaultTimeout(cRMFuncLib.getMaxTimeOut());
+		HashMap<String, String> hashmapImport = new HashMap<String, String>();
+		String stringmethod = cRMFuncLib.getTestData(csvdatareplacementparamlist);
+		int length=stringmethod.split(";").length;
+
+		for(int i=0;i<length;i++){
+			String[] arrayvalues = stringmethod.split(";")[i].split("=");
+			if (arrayvalues[1].contains("\"")){
+				arrayvalues[1] = cRMFuncLib.MakeUnique(arrayvalues[1].replace("\"", ""));
+			}
+			else if (arrayvalues[0].equalsIgnoreCase("DBValue1"))
+				arrayvalues[1]=cRMFuncLib.GetValuefromParamList(csvdatareplacementparamlist, "DBValue1");
+			else if (arrayvalues[0].equalsIgnoreCase("DBValue2"))
+				arrayvalues[1]=cRMFuncLib.GetValuefromParamList(csvdatareplacementparamlist, "DBValue2");
+			else if (arrayvalues[0].equalsIgnoreCase("DBValue3"))
+				arrayvalues[1]=cRMFuncLib.GetValuefromParamList(csvdatareplacementparamlist, "DBValue3");
+
+			hashmapImport.put(arrayvalues[0], arrayvalues[1]);
+
+		}
+		System.out.println(hashmapImport);
+		//Get template file using relative path
+		String masterCsvfile=TemplateName;
+		String codeLinePath="",spath;
+		spath=getScriptPackage().getScriptPath();
+		int len1=spath.split("src")[0].split("\\\\").length;
+		for (int l=0;l<len1-1;l++){
+			codeLinePath=codeLinePath+spath.split("src")[0].split("\\\\")[l]+"\\";
+		}
+		String masterCsv=codeLinePath+"oats\\src\\data\\ImportFiles\\DataTemplate\\"+masterCsvfile;
+		info ("Master CSV file path is "+masterCsv);
+		String updatedCsv=cRMFuncLib.GetValuefromParamList(ImportFileNameparamlist,"DataFilePath");
+		info ("Updated CSV file path is "+updatedCsv);
+		File f = new File(updatedCsv);
+		f.createNewFile();
+		BufferedReader in
+		= new BufferedReader(new FileReader(masterCsv));
+		String readLine=in.readLine();
+		BufferedWriter out = new BufferedWriter(new FileWriter(updatedCsv));    
+		out.write(readLine);
+		Set<String> keys=hashmapImport.keySet();
+		while((readLine=in.readLine())!=null)
+		{
+			for(Object key:keys)
+			{
+				readLine=readLine.replace(key.toString(), hashmapImport.get(key).toString());
+			}
+			out.newLine();
+			out.write(readLine);
+		}
+		in.close();
+		out.close();
+	}
+
+	/*Method to retrieve the content ID from the File Import Export Page*/
+
+	public String getContentIdFrmFileImportExportPage(String testcaseName) throws Exception {
+
+		adfUtils = new ADFUtils(this,web,adf).defaultTimeout(cRMFuncLib.getMaxTimeOut());
+		String Locator = cRMFuncLib.GetValuefromParamList(testcaseName, "FileImpExp_BrowselocatorID");
+		String Path = cRMFuncLib.GetValuefromParamList(testcaseName, "Account_Path");
+		String Filename = cRMFuncLib.GetValuefromParamList(testcaseName, "StaticFilename");
+		spath=getScriptPackage().getScriptPath();
+		int len1=spath.split("src")[0].split("\\\\").length;
+		for (int l=0;l<len1-1;l++){
+			codeLinePath=codeLinePath+spath.split("src")[0].split("\\\\")[l]+"\\";
+		}
+		DataFilePath=codeLinePath+"oats\\src\\data\\ImportFiles\\DataTemplate\\CommonCRM\\"+Filename;
+		info("The file path is : "+ DataFilePath);
+		adfUtils.waitForServer();	//NOPMD
+		web.image("{{obj.CommonOR.ClassicUI_FileImportExport_Createbutton}}").click();
+		adfUtils.waitForServer();
+		importLib.browsefile(DataFilePath, Locator);
+		adf.selectOneChoice("{{obj.CommonOR.CmbAccount}}").select(Path);
+		adfUtils.waitForServer();
+		adf.commandButton("{{obj.CommonOR.BtnSaveAndCloseUploadFilePop}}").click();
+		adfUtils.waitForServer();
+		if (web.element("/web:window[@index='0' or @title='File Import and Export - File Import and Export - Oracle Applications']/web:document[@index='0']/web:ADFTable[@absoluteLocator='pt1:USma:MAnt1:pt1:AP1:AT1:_ATp:ATt1']").exists(10, TimeUnit.SECONDS)){
+			think(5);
+			web.element("/web:window[@index='0' or @title='File Import and Export - File Import and Export - Oracle Applications']/web:document[@index='0']/web:a[@text='View']").click(); //NOPMD
+			think(10); //NOPMD
+			web.element("/web:window[@index='0' or @title='File Import and Export - File Import and Export - Oracle Applications']/web:document[@index='0']/web:td[@text='Columns']").click(); //NOPMD
+			think(10); //NOPMD
+			web.element("/web:window[@index='0' or @title='File Import and Export - File Import and Export - Oracle Applications']/web:document[@index='0']/web:td[@text='Content ID']").click(); //NOPMD
+		}
+
+		int colNum = cRMFuncLib.getColumnNumber(adf.table("{{obj.CommonOR.TblSearchResults}}"), "File");
+		String fileName = adf.table("{{obj.CommonOR.TblSearchResults}}").getCellElement(0, colNum).getDisplayText();
+		System.out.println(colNum + fileName);
+
+		int colNam = cRMFuncLib.getColumnNumber(adf.table("{{obj.CommonOR.TblSearchResults}}"), "Content ID");
+		String contentID = adf.table("{{obj.CommonOR.TblSearchResults}}").getCellElement(0, colNam).getDisplayText();
+		System.out.println(colNam + contentID);
+		think(5);
+
+		if (web.element("/web:window[@index='0' or @title='File Import and Export - File Import and Export - Oracle Applications']/web:document[@index='0']/web:ADFTable[@absoluteLocator='pt1:USma:MAnt1:pt1:AP1:AT1:_ATp:ATt1']").exists(10, TimeUnit.SECONDS)){
+			think(10); //NOPMD
+			web.element("/web:window[@index='0' or @title='File Import and Export - File Import and Export - Oracle Applications']/web:document[@index='0']/web:a[@text='View']").click(); //NOPMD
+			think(10); //NOPMD
+			web.element("/web:window[@index='0' or @title='File Import and Export - File Import and Export - Oracle Applications']/web:document[@index='0']/web:td[@text='Columns']").click(); //NOPMD
+			think(10); //NOPMD
+			web.element("/web:window[@index='0' or @title='File Import and Export - File Import and Export - Oracle Applications']/web:document[@index='0']/web:td[@text='Content ID']").click();	 //NOPMD
+			think(10);
+		}
+		if (fileName !=null)
+			cRMFuncLib.verify_step("File is uploaded into the table and the filename is: " + fileName, "P");
+		else
+			cRMFuncLib.verify_step("The File is not uploaded in the table", "F");
+
+		return contentID;
+	} 
+
+	/*Method to zip a folder*/
+
+	public  void zipFolder(String param) throws Exception {
+
+		String folder = cRMFuncLib.GetValuefromParamList(param,"Folder");
+		String destZipFile =  cRMFuncLib.GetValuefromParamList(param,"Zippath");
+		String codeLinePath="",spath;
+		spath=getScriptPackage().getScriptPath();
+		int len1=spath.split("ImportLib")[0].split("\\\\").length;
+		for (int l=0;l<len1-1;l++){
+			codeLinePath=codeLinePath+spath.split("ImportLib")[0].split("\\\\")[l]+"\\";
+		}	
+		String srcfolder =codeLinePath+"src\\data\\ImportFiles\\DataTemplate\\CommonCRM"+folder;
+
+		String rootpath = cRMFuncLib.GetValuefromParamList("CreateImportLeadZIP", "Folder");
+		ZipOutputStream zip = null;
+		FileOutputStream fileWriter = null;
+
+		fileWriter = new FileOutputStream(destZipFile);
+		zip = new ZipOutputStream(fileWriter);
+
+		addFolderToZip("", srcfolder, zip);
+		zip.flush();
+		zip.close();
+
+	}
+
+	/*Method to add folder into the zip file*/
+
+	public void addFolderToZip(String path, String srcFolder, ZipOutputStream zip) throws Exception {
+		File folder = new File(srcFolder);
+
+		for (String fileName : folder.list()) {
+			if (path.equals("")) {
+				addFileToZip(folder.getName(), srcFolder + "/" + fileName, zip);
+			} else {
+				addFileToZip(path + "/" + folder.getName(), srcFolder + "/" + fileName, zip);
+			}
+		}
+	}
+
+	/*Method to add files into the zip file*/
+
+	public void addFileToZip(String path, String srcFile, ZipOutputStream zip) throws Exception {
+
+		File folder = new File(srcFile);
+		if (folder.isDirectory()) {
+			addFolderToZip(path, srcFile, zip);
+		} else {
+			byte[] buf = new byte[1024];
+			int len;
+			FileInputStream in = new FileInputStream(srcFile);
+			zip.putNextEntry(new ZipEntry(path + "/" + folder.getName()));
+			while ((len = in.read(buf)) > 0) {
+				zip.write(buf, 0, len);
+			}
+		}
+	}
+
+	/* Method to fetch value from the CSV file whose returned value is the fetched value*/
+
+	public String fetchDataFromCSVFile(String CSVPath,int rownumber,int columnnumber,String separator) throws Exception{
+
+		int counter = 0;
+		String line = null;
+		String[] args = null;
+		BufferedReader stream = null;
+		try {
+			stream = new BufferedReader(new FileReader(CSVPath));
+			while ((line = stream.readLine()) != null){
+				counter++;
+				info("The line read is , line number:" + counter + " and the line is :" + line);
+				if (counter==rownumber){
+					args = line.split(separator);
+					info("the value is :" +args[columnnumber]);
+					break;
+				}else{
+					info("We will read the next line");
+				}
+			}
+			cRMFuncLib.verify_step("The text fetched is from line number  : " + rownumber + " and the fetched value is : " + args[columnnumber],"P");
+		} catch(Exception e){
+			e.printStackTrace();
+			cRMFuncLib.verify_step("The text is not fetched properly","F");
+		}finally{
+			stream.close();
+		}
+		return args[columnnumber];
+	}
+
+	public void finish() throws Exception {
+		
+	}
+}

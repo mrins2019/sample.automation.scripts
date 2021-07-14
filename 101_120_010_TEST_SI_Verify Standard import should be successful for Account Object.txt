@@ -1,0 +1,229 @@
+//********************************************************************************************************************************
+// SCRIPT NAME    : 101_120_010_TEST_SI_Verify Standard import should be successful for Account Object
+//--------------------------------------------------------------------------------------------------------------------------------
+// DATE CREATED   : 3/4/2017
+// AUTHOR         : mrinal.j.kumar
+// FRAMEWORK TYPE : PAGE OBJECT MODEL  
+//*********************************************************************************************************************************
+
+import java.awt.Robot;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
+import java.awt.dnd.DropTargetEvent;
+import java.awt.event.ActionEvent;
+import java.awt.event.InputEvent;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Properties;
+import java.util.concurrent.TimeUnit;
+
+import oracle.javatools.oats.ADFUtils;
+import oracle.oats.scripting.modules.basic.api.*;
+import oracle.oats.scripting.modules.basic.api.exceptions.AbstractScriptException;
+import oracle.oats.scripting.modules.browser.api.*;
+import oracle.oats.scripting.modules.functionalTest.api.*;
+import oracle.oats.scripting.modules.functionalTest.common.api.internal.types.Rect;
+import oracle.oats.scripting.modules.utilities.api.*;
+import oracle.oats.scripting.modules.utilities.api.sql.*;
+import oracle.oats.scripting.modules.utilities.api.xml.*;
+import oracle.oats.scripting.modules.utilities.api.file.*;
+import oracle.oats.scripting.modules.webdom.api.*;
+import oracle.oats.scripting.modules.adf.api.*;
+
+
+public class script<DnDAction> extends IteratingVUserScript {
+	@ScriptService oracle.oats.scripting.modules.utilities.api.UtilitiesService utilities;
+	@ScriptService oracle.oats.scripting.modules.browser.api.BrowserService browser;
+	@ScriptService oracle.oats.scripting.modules.functionalTest.api.FunctionalTestService ft;
+	@ScriptService oracle.oats.scripting.modules.webdom.api.WebDomService web;
+	@ScriptService oracle.oats.scripting.modules.adf.api.ADFService adf;
+	@FunctionLibrary("CRMFuncLib") lib.myCompany.myTeam.CRMFuncLib cRMFuncLib;
+	@FunctionLibrary("CommonMethods") lib.myCompany.myTeam.CommonMethods commonMethods;
+	@FunctionLibrary("ManageImportsPage") lib.myCompany.myTeam.ManageImportsPage manageImportsPage;
+	@FunctionLibrary("CreateImportActivityPage") lib.myCompany.myTeam.CreateImportActivityPage createImportActivityPage;
+	@FunctionLibrary("MapFieldsPage") lib.myCompany.myTeam.MapFieldsPage mapFieldsPage;
+	@FunctionLibrary("ReviewSubmitPage") lib.myCompany.myTeam.ReviewSubmitPage reviewSubmitPage;
+	@FunctionLibrary("ImportStatusPage") lib.myCompany.myTeam.ImportStatusPage importStatusPage;
+
+	ADFUtils adfUtils;	
+	private HashMap<String,String> TestDataLoad;
+	private HashMap<Object,String> JobParameters;
+	private HashMap<Object,String> ImportStatusPageDownloadableFiles;
+	private final String productName="CommonCRM";
+	private String testcaseName="101_120_010_TEST_SI_Verify Standard import should be successful for Account Object";
+	private String jobName,username,ImportJobName,ImportObject,OperationalFlag,SearchedItem,Attachment,ImportMode,updatedCSVFileName,updateCSVPath,updatedCSV,Delimiter,TemplatesName;	
+	private final String CommonData="CommonData";
+	private String[] TemplateArray;
+	private final boolean run=true;
+
+	public void initialize() throws Exception {
+
+		cRMFuncLib.initSettings(productName, testcaseName);
+
+		//Fetching the script path
+		String scriptpath=getScriptPackage().getScriptPath();		
+
+		//Creating the Linkedhashmap, hashmap/list objects		
+		TestDataLoad = new HashMap<String,String>();
+		JobParameters = new HashMap<Object,String>();
+		ImportStatusPageDownloadableFiles= new HashMap<Object,String>();
+
+		//Loading csv Test data files
+		TestDataLoad =cRMFuncLib.loadcsv("CommonCRM","CommonCRM");
+
+		//Loading the csv file path from test data sheet
+		updateCSVPath=cRMFuncLib.GetValuefromParamList(CommonData,"CSVPath");
+
+		//Creating a unique jobname and reading the values for Import Object,SearchedItem, ImportMode and Delimiter
+		jobName = cRMFuncLib.MakeUnique("FirstJob_");
+		ImportObject=cRMFuncLib.GetValuefromParamList(testcaseName,"ImportObject");
+		SearchedItem = cRMFuncLib.GetValuefromParamList(CommonData,"SearchedItem");
+		ImportMode = cRMFuncLib.GetValuefromParamList(testcaseName,"ImportMode");
+		Delimiter = cRMFuncLib.GetValuefromParamList(testcaseName,"Delimiter");
+
+		// Checking whether there are single template file or multiple files
+		TemplatesName = cRMFuncLib.GetValuefromParamList(testcaseName,"Templates");
+		if (TemplatesName.contains(":"))
+		{
+			TemplateArray = TemplatesName.split(":"); //Working on multiple template files 
+			int array_count = TemplateArray.length;
+			info("The total number of templates available in test data sheet are: " + array_count);
+			updatedCSVFileName=cRMFuncLib.MakeUnique("SI");		
+			updatedCSV = updateCSVPath+updatedCSVFileName+".csv";
+			cRMFuncLib.StoreVariable("DataFilePath", updatedCSV);
+			commonMethods.dynamicCsvFilePreparation("csvdatareplacement",TemplateArray[0],testcaseName);//Creating the first dynamic file using the first template
+
+		}else{
+			updatedCSVFileName=cRMFuncLib.MakeUnique("SI");	//Working on single template file
+			updatedCSV = updateCSVPath+updatedCSVFileName+".csv";
+			cRMFuncLib.StoreVariable("DataFilePath", updatedCSV);
+			commonMethods.dynamicCsvFilePreparation("csvdatareplacement",TemplatesName,testcaseName);// Creating the only one dynamic csv file using one and only template file
+		}
+
+		/*Note: In case of the static input csv file then remove the above if else conditions and add the below one line
+		 * updatedCSV = cRMFuncLib.GetValuefromParamList(testcaseName,"StaticFileName");
+		 * In the test data sheet kindly provide the Filename and its value.
+		 * */
+
+		//Adding the variables into the hashmap instance variable
+		JobParameters.put("JobName", jobName);
+		JobParameters.put("ObjectName", ImportObject);
+		JobParameters.put("FileName", updatedCSV);
+		JobParameters.put("Delimiter", Delimiter);
+		JobParameters.put("ImportMode", ImportMode);
+
+		/*Adding various downloadable files available in Import Status page in a hashmap variable
+
+		 * The various files are :
+		 * 1. CSV; Downloading the csv file
+		 * 2. CSVSEMICOLON; Downloading the csv file which is semicolon separated
+		 * 3. ERROR; Downloading the error csv file 
+		 * 4. ERROREXCEPTION; Downloading the error and exception files
+		 * 5. DIAGNOSTIC; Downloading the diagnostic file
+		 * 6. PROCESS; Downloading the process log file
+		 * 7. MAPPING; Downloading the mapping file
+		 * 8. SUCCESS; Downloading the success file 
+		 * */
+
+		ImportStatusPageDownloadableFiles.put("DownloadableFileFrmImportStatusPage", "CSV");
+		ImportStatusPageDownloadableFiles.put("ReadfrmFile", "");
+		ImportStatusPageDownloadableFiles.put("LoadedSuccessfully", "");
+		ImportStatusPageDownloadableFiles.put("ErrorReported", "");
+		ImportStatusPageDownloadableFiles.put("Warning", "");
+
+		//Plan steps of the Test flow
+		cRMFuncLib.Plan_Step("Autostep1", "Login to FUSE application, Navigate through 'Import Management' link to the landing page",scriptpath, true);
+		cRMFuncLib.Plan_Step("Autostep2", "Click on the 'Create Import Activity' in the landing page",scriptpath, true);
+		cRMFuncLib.Plan_Step("Autostep3", "Create the job in the 'Create Import Activity' page",scriptpath, true);
+		cRMFuncLib.Plan_Step("Autostep4", "Click on 'Next' and then 'Submit' button in order to Submit the created job",scriptpath, true);
+		cRMFuncLib.Plan_Step("Autostep5", "Validate the status of the job in the landing page and do necessary checks/downloads in the Import Status page",scriptpath, true);
+		cRMFuncLib.Plan_Step("Autostep6", "Logout of the application",scriptpath, true);	
+		cRMFuncLib.Plan_Step("Autostep7", "Login to FUSE application again, Navigate through 'Import Management' link to the landing page",scriptpath, true);
+		cRMFuncLib.Plan_Step("Autostep8", "Click on the 'Create Import Activity' in the landing page",scriptpath, true);
+		cRMFuncLib.Plan_Step("Autostep9", "Create another job in the 'Create Import Activity' page",scriptpath, true);
+		cRMFuncLib.Plan_Step("Autostep10", "Click on 'Next' and then 'Submit' button in order to Submit the created job",scriptpath, true);
+		cRMFuncLib.Plan_Step("Autostep11", "Validate the status of the job in the landing page and do necessary checks/downloads in the Import Status page",scriptpath, true);
+		cRMFuncLib.Plan_Step("Autostep12", "Logout of the application",scriptpath, true);
+	}
+
+	/**
+	 * Add code to be executed each iteration for this virtual user.
+	 */
+	public void run() throws Exception {
+		try{
+
+			/*Logging into the FUSE application*/
+			cRMFuncLib.BeginTransaction("Autostep1");
+			username = cRMFuncLib.GetValuefromParamList(CommonData,"Username");	
+			commonMethods.crm_login(run, username, false);
+
+			/*Clicking on the create button*/
+			cRMFuncLib.BeginTransaction("Autostep2");
+			manageImportsPage.clickCreateButton();
+
+			/*Creating the first import job*/
+			cRMFuncLib.BeginTransaction("Autostep3");
+			createImportActivityPage.createImport(JobParameters,testcaseName);
+
+			/*Clicking Next button to navigate to the next page and Clicking Submit button which submits the created job*/
+			cRMFuncLib.BeginTransaction("Autostep4");
+			mapFieldsPage.clickNext(); 
+			reviewSubmitPage.clickSubmit();  
+
+			/*Validating the status of the created job and performing necessary downloads in Import Status page*/
+			cRMFuncLib.BeginTransaction("Autostep5");
+			manageImportsPage.monitorImportStatus(jobName,ImportStatusPageDownloadableFiles); 
+
+			/*Logging out from the application*/
+			cRMFuncLib.BeginTransaction("Autostep6");
+			cRMFuncLib.crm_logout();
+			
+			/*Login again into the FUSE application for the second job creation*/
+			cRMFuncLib.BeginTransaction("Autostep7");
+			commonMethods.crm_login(run, username, false);
+
+			/*Clicking on the create button*/
+			cRMFuncLib.BeginTransaction("Autostep8");
+			manageImportsPage.clickCreateButton();
+
+			/*Creating the second import job*/
+			cRMFuncLib.BeginTransaction("Autostep9");
+			jobName = cRMFuncLib.MakeUnique("SecondJob_");
+			updatedCSVFileName=cRMFuncLib.MakeUnique("SI");		
+			updatedCSV = updateCSVPath+updatedCSVFileName+".csv";
+			cRMFuncLib.StoreVariable("DataFilePath", updatedCSV);
+			commonMethods.dynamicCsvFilePreparation("csvdatareplacement",TemplateArray[1],testcaseName);
+			JobParameters.put("JobName", jobName);
+			JobParameters.put("ObjectName", ImportObject);
+			JobParameters.put("FileName", updatedCSV);
+			JobParameters.put("Delimiter", Delimiter);
+			JobParameters.put("ImportMode", ImportMode);
+			createImportActivityPage.createImport(JobParameters,testcaseName);
+
+			/*Clicking Next button to navigate to the next page and clicking the Submit button which submits the created job*/
+			cRMFuncLib.BeginTransaction("Autostep10");
+			mapFieldsPage.clickNext(); 
+			reviewSubmitPage.clickSubmit();  
+
+			/*Validating the status of the created job and performing necessary downloads in Import Status page*/
+			cRMFuncLib.BeginTransaction("Autostep11");
+			manageImportsPage.monitorImportStatus(jobName,ImportStatusPageDownloadableFiles); 
+
+			/*Logging out from the application*/
+			cRMFuncLib.BeginTransaction("Autostep12");
+			cRMFuncLib.crm_logout();
+			
+
+		}catch (Exception e){
+			cRMFuncLib.DisplayFailureResult(e);
+		}	
+	}
+
+	public void finish() throws Exception {
+		cRMFuncLib.endAllTransactions();
+		TestDataLoad.clear();
+	}
+}

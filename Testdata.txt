@@ -1,0 +1,6 @@
+########################################Common Test Data##################################################
+CommonData,CSVPath="F:\CRM\ImportFilesTemp\";browseLocatorID="_FOpt1:_FOr1:_FOSritemNode_tools_ImportManagement:MAnt2:pt1:AP1:if1::content";Username="EXTN_OUTLOOK_USER5";ProfileValue="ORA_ZCA_IMPORT_ENABLE_IMPORT_MANAGEMENT";Task="Manage Administrator Profile Values";Title="Manage Administrator Profile Values";Profile_PanelTxt="Imports";SearchedItem="Name";MapdefText="Drag target attribute here"
+**************************************************************************************************************************************************
+##########101_120_010_TEST_SI_Verify Standard import should be successful for Account Object###################
+101_120_010_TEST_SI_Verify Standard import should be successful for Account Object,AdvancedOptions=Y;ImportObject="Account";DataFilePath=updatedCSV;Templates="LeadImportSI.csv:LeadImportSIE.csv";StaticFilename="";Delimiter="";ImportMode="";AttachmentObject="";AccountPage_AccountName="Account Name"
+**************************************************************************************************************************************************
